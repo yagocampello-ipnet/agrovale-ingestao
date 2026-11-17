@@ -252,7 +252,7 @@ df_milho_final = df_milho_final.round(3)
 print(f"\nTabela 1 (Talhao_Milho_01 Quinzenal) salva com sucesso! ({len(df_milho_final)} linhas)")
 
 
-print(f"Exportando {len(df_final)} registros para o BigQuery na tabela {BQ_TABLE}...")
+print(f"Exportando {len(df_milho_final)} registros para o BigQuery na tabela {BQ_TABLE}...")
 
 # O pandas-gbq converte automaticamente o DataFrame para Parquet por baixo dos panos na hora do upload,
 # garantindo os tipos de dados e economizando banda.
