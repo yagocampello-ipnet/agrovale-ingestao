@@ -1,5 +1,6 @@
 earthengine-api
-geemap
-geopandas
 pandas
 pyarrow
+pandas-gbq
+db-dtypes
+google-auth
