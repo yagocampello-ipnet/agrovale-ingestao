@@ -6,7 +6,7 @@ import google.auth
 # ==========================================
 # CONFIGURAÇÕES DO PROJETO
 # ==========================================
-PROJECT_ID = 'Agrovale-gcp' 
+PROJECT_ID = 'agrovale-gcp' 
 BQ_TABLE = 'agrovale_dataset.bronze_15d' 
 
 # 1. Autenticação via Service Account (Cloud Run)
