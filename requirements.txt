@@ -4,3 +4,4 @@ pyarrow
 pandas-gbq
 db-dtypes
 google-auth
+google-cloud-dataform

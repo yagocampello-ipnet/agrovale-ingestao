@@ -252,14 +252,14 @@ df_milho_final = df_milho_final.round(3)
 print(f"\nTabela 1 (Talhao_Milho_01 Quinzenal) salva com sucesso! ({len(df_milho_final)} linhas)")
 
 
-print(f"Exportando {len(df_milho_final)} registros para o BigQuery na tabela {BQ_TABLE}...")
+print(f"Exportando {len(df_milho_final)} registros para o BigQuery na tabela {BQ_TABLE_15D}...")
 
 # O pandas-gbq converte automaticamente o DataFrame para Parquet por baixo dos panos na hora do upload,
 # garantindo os tipos de dados e economizando banda.
 df_milho_final.to_gbq(
     destination_table=BQ_TABLE_15D,
     project_id=PROJECT_ID,
-    if_exists='append', # Use 'append' caso este script rode recorrentemente para adicionar novas quinzenas
+    if_exists='replace', # Use 'append' caso este script rode recorrentemente para adicionar novas quinzenas
 )
 
 
