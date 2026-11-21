@@ -303,7 +303,7 @@ else:
         query_hist = f"""
             SELECT talhao_id, data, chuva_diaria_mm, eh_dia_seco, dias_secos_consecutivos 
             FROM `{PROJECT_ID}.{BQ_TABLE_DIARIA}` 
-            WHERE data > DATE_SUB(DATE('{ultima_data_bq.strftime('%Y-%m-%d')}'), INTERVAL 40 DAY)
+            WHERE DATE(data) > DATE_SUB(DATE('{ultima_data_bq.strftime('%Y-%m-%d')}'), INTERVAL 40 DAY)
             ORDER BY data ASC
         """
         df_historico_bq = bq_client.query(query_hist).to_dataframe()
