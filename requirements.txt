@@ -5,3 +5,5 @@ pandas-gbq
 db-dtypes
 google-auth
 google-cloud-dataform
+google-cloud-bigquery
+gspread
