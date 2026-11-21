@@ -347,9 +347,9 @@ else:
         df_calc = pd.concat([df_historico_bq, df_novos], ignore_index=True) if not df_historico_bq.empty else df_novos
         df_calc = df_calc.sort_values(by=['talhao_id', 'data']).reset_index(drop=True)
         
-        df_calc['dias_secos_consecutivos'] = df_calc.groupby('talhao_id').apply(
-            lambda g: g.groupby((g['eh_dia_seco'] == 0).cumsum())['eh_dia_seco'].cumsum()
-        ).reset_index(level=0, drop=True)
+        df_calc['dias_secos_consecutivos'] = df_calc.groupby(
+            ['talhao_id', (df_calc['eh_dia_seco'] == 0).cumsum()]
+        )['eh_dia_seco'].cumsum()
         
         df_calc['chuva_acum_7d_mm'] = df_calc.groupby('talhao_id')['chuva_diaria_mm'].transform(lambda x: x.rolling(7, min_periods=1).sum().round(2))
         df_calc['chuva_acum_15d_mm'] = df_calc.groupby('talhao_id')['chuva_diaria_mm'].transform(lambda x: x.rolling(15, min_periods=1).sum().round(2))
