@@ -50,7 +50,7 @@ def obter_valor_maximo_bq(tabela, coluna):
 print("Lendo dados do Google Sheets...")
 gc = gspread.authorize(credentials)
 planilha = gc.open_by_key(SPREADSHEET_ID)
-aba = planilha.sheet1
+aba = planilha.worksheet("Respostas ao formulário 1")
 dados_forms = aba.get_all_records()
 df_sheets = pd.DataFrame(dados_forms)
 
