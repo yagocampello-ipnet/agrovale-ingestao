@@ -73,6 +73,8 @@ for index, row in df_sheets.iterrows():
         ano_inicio_talhao = 2018
         
     coords = []
+    print(f"\n--- DEBUG TALHÃO: '{talhao_id}' ---")
+
     # Varre as 11 possíveis colunas de coordenadas no Forms
     for i in range(1, 12):
         lat_col = f"Latitude {i}"
@@ -81,11 +83,18 @@ for index, row in df_sheets.iterrows():
         if lat_col in df_sheets.columns and lon_col in df_sheets.columns:
             lat = row[lat_col]
             lon = row[lon_col]
+            print(f"  Ponto {i} bruto da planilha -> Lat: {repr(lat)} | Lon: {repr(lon)}")
             
-            # Se preencheu essa coordenada, adiciona na lista (GEE usa [Longitude, Latitude])
+            # AQUI ESTÁ A SUA PARTE MANTIDA (com try/except para não travar se vier texto inválido):
             if pd.notna(lat) and pd.notna(lon) and str(lat).strip() != '' and str(lon).strip() != '':
-                coords.append([float(lon), float(lat)])
-                
+                try:
+                    coords.append([float(lon), float(lat)])
+                except Exception as e:
+                    print(f"  [ERRO] Falha ao converter Ponto {i} para float: {e}")
+        else:
+            print(f"  [AVISO] Colunas '{lat_col}' ou '{lon_col}' não existem nos cabeçalhos lidos!")
+            
+    print(f"Total de coordenadas válidas para '{talhao_id}': {len(coords)} -> {coords}")
     if len(coords) >= 3: # Um polígono precisa de pelo menos 3 pontos
         # Garante que o polígono está fechado (último ponto igual ao primeiro)
         if coords[0] != coords[-1]:
