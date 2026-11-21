@@ -58,11 +58,19 @@ mapbiomas = ee.Image('projects/mapbiomas-public/assets/brazil/lulc/collection9/m
 uso_solo = mapbiomas.select('classification_2023')
 
 lista_features_talhoes = []
+anos_inicio_dict = {}
 
 for index, row in df_sheets.iterrows():
     talhao_id = str(row.get('Nome de Identificação do Talhão', '')).strip()
     if not talhao_id:
         continue
+        
+    # Lê o Ano de Início (Geoanálise) e garante que não seja menor que 2018
+    ano_raw = row.get('Ano de Início (Geoanálise)', 2018)
+    try:
+        ano_inicio_talhao = max(2018, int(float(str(ano_raw).strip())))
+    except (ValueError, TypeError):
+        ano_inicio_talhao = 2018
         
     coords = []
     # Varre as 11 possíveis colunas de coordenadas no Forms
@@ -96,20 +104,25 @@ for index, row in df_sheets.iterrows():
             'talhao_id': talhao_id,
             'uso_solo_mapbiomas': 'Lavoura Temporaria (Soja/Milho)',
             'area_total_ha': area_total_ha,
-            'area_ha': area_util_ha
+            'area_ha': area_util_ha,
+            'ano_inicio_geoanalise': ano_inicio_talhao
         })
         lista_features_talhoes.append(feature)
+        anos_inicio_dict[talhao_id] = ano_inicio_talhao
 
 if talhao_novo:
     print(f"Execução instantânea (Webhook) detectada para o talhão: {talhao_novo}")
     # Filtra a lista para rodar APENAS o novo talhão
     lista_features_talhoes = [f for f in lista_features_talhoes if f.get('talhao_id').getInfo() == talhao_novo]
+    anos_inicio_dict = {k: v for k, v in anos_inicio_dict.items() if k == talhao_novo}
 else:
     print("Execução de rotina detectada. Processando todos os talhões da planilha.")
 
 if not lista_features_talhoes:
     print("Nenhum talhão válido para processar. Encerrando.")
     exit(0)
+
+menor_ano_inicio = min(anos_inicio_dict.values()) if anos_inicio_dict else 2018
 
 talhoes_milho = ee.FeatureCollection(lista_features_talhoes)
 perimetro_fazenda = talhoes_milho.geometry()
@@ -144,12 +157,16 @@ def prep_modis(img):
 # ==============================================================================
 print("\n1. Iniciando extração da Tabela Quinzenal (Ciclo do Milho)...\n")
 
+# Como na função extrair_ciclo_milho_safra o ano_milho (colheita) = ano_inicio_safra + 1,
+# garantimos que a primeira safra extraída corresponda ao ano solicitado (mínimo safra 2018/2019).
+ano_safra_minimo_planilha = max(2018, menor_ano_inicio - 1)
+
 if talhao_novo:
-    ANO_SAFRA_INICIO = 2018
+    ANO_SAFRA_INICIO = ano_safra_minimo_planilha
 else:
     max_ano_colheita = obter_valor_maximo_bq(BQ_TABLE_15D, 'ano_colheita')
     if max_ano_colheita is None:
-        ANO_SAFRA_INICIO = 2018
+        ANO_SAFRA_INICIO = ano_safra_minimo_planilha
     else:
         ANO_SAFRA_INICIO = int(max_ano_colheita) - 1 
 
@@ -231,6 +248,10 @@ for ano_safra in range(ANO_SAFRA_INICIO, ANO_SAFRA_FIM + 1):
 df_milho = pd.concat(lista_dfs_milho, ignore_index=True)
 df_milho['data_inicio'] = pd.to_datetime(df_milho['data_inicio'])
 df_milho = df_milho[df_milho['data_inicio'].dt.date <= hoje]
+
+# Filtra os registros de cada talhão para respeitar o seu respectivo "Ano de Início (Geoanálise)"
+df_milho = df_milho[df_milho['ano_colheita'] >= df_milho['talhao_id'].map(anos_inicio_dict)]
+
 df_milho['data_inicio'] = df_milho['data_inicio'].dt.strftime('%Y-%m-%d')
 
 df_milho['data_ingestao'] = data_ingestao_atual
@@ -256,14 +277,14 @@ df_milho.to_gbq(destination_table=BQ_TABLE_15D, project_id=PROJECT_ID, if_exists
 print("\n2. Iniciando extração da Tabela Diária de Chuva...\n")
 
 if talhao_novo:
-    data_inicio_extracao = '2018-01-01'
+    data_inicio_extracao = f'{menor_ano_inicio}-01-01'
     df_historico_bq = pd.DataFrame()
 else:
     query_max = f"SELECT MAX(data) as max_data FROM `{PROJECT_ID}.{BQ_TABLE_DIARIA}`"
     df_max = bq_client.query(query_max).to_dataframe()
 
     if df_max.empty or pd.isna(df_max.iloc[0]['max_data']):
-        data_inicio_extracao = '2018-01-01'
+        data_inicio_extracao = f'{menor_ano_inicio}-01-01'
         df_historico_bq = pd.DataFrame()
     else:
         ultima_data_bq = pd.to_datetime(df_max.iloc[0]['max_data'])
@@ -307,6 +328,10 @@ else:
     
     if not df_novos.empty:
         df_novos['data'] = pd.to_datetime(df_novos['data'])
+        # Filtra os dados diários para respeitar o "Ano de Início (Geoanálise)" de cada talhão
+        df_novos = df_novos[df_novos['data'].dt.year >= df_novos['talhao_id'].map(anos_inicio_dict)]
+        
+    if not df_novos.empty:
         df_novos['chuva_diaria_mm'] = df_novos['chuva_diaria_mm'].fillna(0).round(2)
         df_novos['eh_dia_seco'] = (df_novos['chuva_diaria_mm'] < 2.0).astype(int)
         
