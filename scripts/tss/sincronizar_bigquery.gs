@@ -1,14 +1,14 @@
 /**
- * AgroVale — Sincronização Automatizada BigQuery (Camada Gold) -> Google Sheets (Canvas)
- * Responsável: TSS / Colaboração
- * Frequência: Acionador baseado no tempo (dias 1 e 16 de cada mês)
+- AgroVale — Sincronização Automatizada BigQuery (Camada Gold) -> Google Sheets (Canvas)
+- Responsável: TSS / Colaboração
+- Frequência: Polling inteligente por metadados (a cada 5 minutos)
  */
 
 const ID_PLANILHA_RAMON = "18C7lDtwR19gR0aYDp5R05LzpA_T4XZwQE9mWNuPNpyI";
 const PROJETO_GCP = "agrovale-gcp";
 const REGIAO_BQ = "us-west1";
 
-function atualizarDadosGoldAutomatico() {
+function atualizarDadosGoldAutomatico_() {
   const tabelasParaExtrair = [
     // --- ESSENCIAIS ---
     { aba: "fato_quinzenal", sql: "SELECT * FROM `agrovale-gcp.gold.fato_quinzenal` ORDER BY talhao_id ASC, data_inicio DESC" },
@@ -69,5 +69,29 @@ function atualizarDadosGoldAutomatico() {
     } catch (erro) {
       Logger.log(`Aviso/Erro em ${item.aba}: ${erro.message}`);
     }
+  }
+}
+
+function verificarEAtualizarGold() {
+  const datasetId = "gold";
+  const tableId = "fato_quinzenal"; // Tabela principal de referência da camada Gold
+
+  try {
+    // Consulta apenas os metadados da tabela (gratuito e instantâneo)
+    const tabela = BigQuery.Tables.get(PROJETO_GCP, datasetId, tableId);
+    const ultimaModificacaoBQ = String(tabela.lastModifiedTime);
+
+    const props = PropertiesService.getScriptProperties();
+    const ultimaExecucaoSalva = props.getProperty("ULTIMA_MODIFICACAO_GOLD");
+
+    if (ultimaModificacaoBQ !== ultimaExecucaoSalva) {
+      Logger.log(`Alteração detectada no BigQuery (${ultimaModificacaoBQ}). Atualizando planilha...`);
+      atualizarDadosGoldAutomatico_();
+      props.setProperty("ULTIMA_MODIFICACAO_GOLD", ultimaModificacaoBQ);
+    } else {
+      Logger.log("Nenhuma alteração na camada Gold desde a última checagem. Execução pulada.");
+    }
+  } catch (erro) {
+    Logger.log(`Erro ao verificar metadados do BigQuery: ${erro.message}`);
   }
 }
