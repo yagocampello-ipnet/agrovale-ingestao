@@ -1,0 +1,248 @@
+// ============================================================================
+// 1. CREDENCIAIS DA CONTA DE SERVIÇO (GCP) E CONFIGURAÇÕES
+// ============================================================================
+var CREDENCIAIS_GCP = {
+  "type": "service_account",
+  "project_id": "",
+  "private_key_id": "",
+  "private_key": ""
+  "client_email": ""
+};
+
+
+var PROJECT_ID = "";
+var LOCATION = "";
+var JOB_NAME = "";
+
+
+// ============================================================================
+// 2. AUTENTICAÇÃO OAUTH2 VIA SERVICE ACCOUNT (JWT)
+// ============================================================================
+function getOAuthService() {
+  return OAuth2.createService('GCP_Auth')
+      .setTokenUrl('https://oauth2.googleapis.com/token')
+      .setPrivateKey(CREDENCIAIS_GCP.private_key)
+      .setIssuer(CREDENCIAIS_GCP.client_email)
+      .setPropertyStore(PropertiesService.getScriptProperties())
+      .setScope('https://www.googleapis.com/auth/cloud-platform');
+}
+
+
+// ============================================================================
+// 3. PRÉ-TRIAGEM: VALIDAÇÃO DE COORDENADAS E ENVIO DE E-MAIL
+// ============================================================================
+function validarCoordenadas(e) {
+  var sheet = (e && e.range) ? e.range.getSheet() : SpreadsheetApp.getActiveSpreadsheet().getActiveSheet();
+  var linha = e.range.getRow();
+  var cabecalho = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
+  var valores = sheet.getRange(linha, 1, 1, sheet.getLastColumn()).getValues()[0];
+ 
+  var statusValidacao = "Válido";
+  var erros = [];
+  var coordenadasColunas = [];
+
+
+  // Busca coluna de e-mail
+  var emailIdx = cabecalho.findIndex(c => /e-?mail/i.test(String(c)));
+  var emailCliente = emailIdx !== -1 ? (valores[emailIdx] || "").toString().trim() : "";
+
+
+  // Busca Nome do Talhão
+  var nomeIdx = cabecalho.findIndex(c => /nome/i.test(String(c)));
+  var nomeTalhao = nomeIdx !== -1 ? (valores[nomeIdx] || "Talhão").toString().trim() : (valores[1] || "Talhão");
+
+
+  var totalParesPreenchidos = 0;
+
+
+  for (var i = 1; i <= 11; i++) {
+    // Para o par 1, aceita "Latitude 1" OU apenas "Latitude" (sem número)
+    var regexLat = (i === 1)
+      ? /^(?=.*latitude)(?:.*latitude\s*0?1(?!\d)|(?:(?!latitude\s*\d).)*)$/i
+      : new RegExp("latitude\\s*0?" + i + "(?!\\d)", "i");
+
+
+    var regexLon = (i === 1)
+      ? /^(?=.*longitude)(?:.*longitude\s*0?1(?!\d)|(?:(?!longitude\s*\d).)*)$/i
+      : new RegExp("longitude\\s*0?" + i + "(?!\\d)", "i");
+
+
+    var latIdx = cabecalho.findIndex(c => regexLat.test(String(c).trim()));
+    var lonIdx = cabecalho.findIndex(c => regexLon.test(String(c).trim()));
+   
+    if (latIdx === -1 || lonIdx === -1) continue;
+   
+    coordenadasColunas.push(latIdx + 1, lonIdx + 1);
+
+
+    var latRaw = (valores[latIdx] || "").toString().trim().replace(",", ".");
+    var lonRaw = (valores[lonIdx] || "").toString().trim().replace(",", ".");
+
+
+    if (latRaw === "" && lonRaw === "") continue;
+
+
+    totalParesPreenchidos++;
+
+
+    // 1. Par incompleto
+    if (latRaw === "" || lonRaw === "") {
+      erros.push("Coordenada " + i + ": par incompleto (Lat: " + (latRaw || "vazio") + " / Lon: " + (lonRaw || "vazio") + ").");
+      continue;
+    }
+
+
+    // 2. Formato numérico puro (rejeita textos, colchetes ou múltiplos pontos)
+    if (!/^-?\d+(\.\d+)?$/.test(latRaw) || !/^-?\d+(\.\d+)?$/.test(lonRaw)) {
+      erros.push("Coordenada " + i + ": formato inválido (" + latRaw + " / " + lonRaw + "). Use apenas números.");
+      continue;
+    }
+
+
+    var latNum = parseFloat(latRaw);
+    var lonNum = parseFloat(lonRaw);
+
+
+    // 3. Limites globais
+    if (latNum < -90 || latNum > 90 || lonNum < -180 || lonNum > 180) {
+      erros.push("Coordenada " + i + ": valores fora da escala geográfica da Terra.");
+      continue;
+    }
+
+
+    // 4. Precisão mínima de 4 casas decimais após o ponto
+    var latCasasDecimais = (latRaw.split(".")[1] || "").length;
+    var lonCasasDecimais = (lonRaw.split(".")[1] || "").length;
+
+
+    if (latCasasDecimais < 4 || lonCasasDecimais < 4) {
+      erros.push("Coordenada " + i + ": precisão insuficiente (" + latRaw + " / " + lonRaw + "). Informe pelo menos 4 números após o ponto (ex: -17.7924).");
+    }
+  }
+
+
+  // 5. Formulário sem coordenadas e sem Shapefile
+  if (totalParesPreenchidos === 0) {
+    var shapefileIdx = cabecalho.findIndex(c => /shap/i.test(String(c)));
+    var shapefile = shapefileIdx !== -1 ? (valores[shapefileIdx] || "").toString().trim() : "";
+    if (shapefile === "") {
+      erros.push("Nenhuma coordenada (Latitude/Longitude) ou Shapefile foi informado.");
+    }
+  }
+
+
+  if (erros.length > 0) statusValidacao = "Inválido";
+  var mensagemErro = erros.join(" | ");
+
+
+  Logger.log("Linha " + linha + " | Status: " + statusValidacao + " | E-mail detectado: " + (emailCliente || "NENHUM"));
+
+
+  // Dispara e-mail em caso de erro
+  if (statusValidacao === "Inválido" && emailCliente !== "" && emailCliente.indexOf("@") !== -1) {
+    var assunto = "Atenção: Correção necessária nas coordenadas do talhão \"" + nomeTalhao + "\"";
+    var listaErrosFormatada = "- " + erros.join("\n- ");
+
+
+    var corpoEmail =
+      "Olá,\n\n" +
+      "Recebemos a sua solicitação de geoanálise para o talhão \"" + nomeTalhao + "\", mas identificamos inconsistências na precisão ou no formato das coordenadas geográficas informadas:\n\n" +
+      listaErrosFormatada + "\n\n" +
+      "Por que isso é necessário?\n" +
+      "O nosso satélite precisa focar no centro exato da sua lavoura. Se você enviar uma coordenada com poucas casas decimais (ex: -17.7), o sistema analisará uma área genérica em vez do seu plantio.\n\n" +
+      "Por medida de segurança e para evitar o processamento de áreas incorretas, as coordenadas enviadas anteriormente foram descartadas do nosso sistema.\n\n" +
+      "Por favor, acesse o Google Maps, clique no centro do seu terreno, copie o número completo com todas as casas decimais (ex: -17.792419, -50.919283) e reenvie o formulário através do Portal do Produtor.\n\n" +
+      "Atenciosamente,\n" +
+      "Equipe de Suporte Técnico - Portal Agrícola";
+
+
+    try {
+      MailApp.sendEmail(emailCliente, assunto, corpoEmail);
+      mensagemErro += " [Aviso enviado por e-mail para " + emailCliente + "]";
+      Logger.log("E-mail de erro enviado com sucesso para: " + emailCliente);
+    } catch (err) {
+      mensagemErro += " [Falha ao enviar e-mail: " + err.message + "]";
+      Logger.log("Erro ao enviar e-mail: " + err.message);
+    }
+  }
+
+
+  // Registra status e log de erro nas colunas finais da planilha
+  var colStatusIdx = cabecalho.indexOf("Status_Validacao");
+  var colStatus = (colStatusIdx !== -1) ? colStatusIdx + 1 : sheet.getLastColumn() + 1;
+ 
+  if (colStatusIdx === -1) {
+    sheet.getRange(1, colStatus).setValue("Status_Validacao");
+    sheet.getRange(1, colStatus + 1).setValue("Mensagem_Erro");
+  }
+
+
+  sheet.getRange(linha, colStatus).setValue(statusValidacao);
+  sheet.getRange(linha, colStatus + 1).setValue(mensagemErro);
+
+
+  return { status: statusValidacao, colunasParaLimpar: coordenadasColunas };
+}
+
+
+// ============================================================================
+// 4. GATILHO PRINCIPAL (Ao enviar formulário)
+// ============================================================================
+function acionarGCP(e) {
+  if (!e || !e.range) return;
+  var sheet = e.range.getSheet();
+  var linha = e.range.getRow();
+
+
+  // 1. Validação
+  var resultado = validarCoordenadas(e);
+
+
+  // APAGA APENAS SE ESTIVER INVÁLIDO: limpa as colunas de coordenadas erradas e aborta o GCP
+  if (resultado.status === "Inválido") {
+    Logger.log("Envio GCP bloqueado na linha " + linha + ". Limpando colunas: " + resultado.colunasParaLimpar.join(", "));
+    resultado.colunasParaLimpar.forEach(col => sheet.getRange(linha, col).clearContent());
+    return;
+  }
+
+
+  // 2. Autenticação e disparo para o GCP (mantendo as coordenadas válidas na planilha)
+  var service = getOAuthService();
+  if (!service.hasAccess()) {
+    Logger.log("Erro OAuth: " + service.getLastError());
+    return;
+  }
+
+
+  var cabecalho = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
+  var valores = sheet.getRange(linha, 1, 1, sheet.getLastColumn()).getValues()[0];
+ 
+  var nomeIdx = cabecalho.findIndex(c => /nome/i.test(String(c)));
+  var talhaoId = nomeIdx !== -1 ? valores[nomeIdx] : valores[1];
+
+
+  var url = "https://run.googleapis.com/v2/projects/" + PROJECT_ID + "/locations/" + LOCATION + "/jobs/" + JOB_NAME + ":run";
+  var payload = {
+    "overrides": {
+      "containerOverrides": [{
+        "env": [{ "name": "TALHAO_ID_NOVO", "value": String(talhaoId) }]
+      }]
+    }
+  };
+ 
+  var options = {
+    "method": "post",
+    "contentType": "application/json",
+    "headers": { "Authorization": "Bearer " + service.getAccessToken() },
+    "payload": JSON.stringify(payload),
+    "muteHttpExceptions": true
+  };
+
+
+  try {
+    var response = UrlFetchApp.fetch(url, options);
+    Logger.log("Status HTTP do Cloud Run: " + response.getResponseCode());
+  } catch (error) {
+    Logger.log("Erro fetch: " + error);
+  }
+}
