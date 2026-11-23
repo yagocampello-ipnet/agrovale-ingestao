@@ -32,21 +32,15 @@ function gerarSugestaoGemini(e) {
   let contextoChamado = "";
   for (let i = 0; i < cabecalhos.length; i++) {
     if (valoresLinha[i] !== "" && i !== 15) {
-      contextoChamado += `${cabecalhos[i]}: ${valoresLinha[i]} | `;
+      contextoChamado += cabecalhos[i] + ": " + valoresLinha[i] + " | ";
     }
   }
 
-  const prompt = `
-    Gere uma sugestão de resposta ao produtor rural em linguagem simples, direta e acolhedora, sem jargões técnicos.
-    Cruze a dúvida do chamado com os dados de satélite abaixo.
-    Se constar 'Aguardando processamento de satélite', informe educadamente que os dados daquele talhão ainda estão sendo processados.
-
-    Dados do chamado:
-    ${contextoChamado}
-
-    Dados de satélite (última quinzena):
-    ${dadosSatelite}
-  `;
+  const prompt = "Gere uma sugestão de resposta ao produtor rural em linguagem simples, direta e acolhedora, sem jargões técnicos.\n" +
+    "Cruze a dúvida do chamado com os dados de satélite abaixo.\n" +
+    "Se constar 'Aguardando processamento de satélite', informe educadamente que os dados daquele talhão ainda estão sendo processados.\n\n" +
+    "Dados do chamado:\n" + contextoChamado + "\n\n" +
+    "Dados de satélite (última quinzena):\n" + dadosSatelite;
 
   const respostaIA = chamarGemini(prompt);
   sheet.getRange(linha, 16).setValue(respostaIA);
@@ -55,13 +49,8 @@ function gerarSugestaoGemini(e) {
 function buscarUltimaQuinzenaBigQuery(talhaoId) {
   if (!talhaoId) return "Aguardando processamento de satélite";
   
-  const query = `
-    SELECT * EXCEPT(data_inicio)
-    FROM \`agrovale-gcp.gold.fato_quinzenal\`
-    WHERE TRIM(talhao_id) = '${talhaoId.replace(/'/g, "")}'
-    ORDER BY data_inicio DESC
-    LIMIT 1
-  `;
+  const talhaoLimpo = talhaoId.replace(/'/g, "");
+  const query = "SELECT * EXCEPT(data_inicio) FROM `agrovale-gcp.gold.fato_quinzenal` WHERE TRIM(talhao_id) = '" + talhaoLimpo + "' ORDER BY data_inicio DESC LIMIT 1";
 
   const queryResults = BigQuery.Jobs.query({ query: query, useLegacySql: false }, "agrovale-gcp");
   
@@ -74,14 +63,14 @@ function buscarUltimaQuinzenaBigQuery(talhaoId) {
   let resumo = [];
   for (let i = 0; i < fields.length; i++) {
     if (row[i].v !== null) {
-      resumo.push(`${fields[i].name}: ${row[i].v}`);
+      resumo.push(fields[i].name + ": " + row[i].v);
     }
   }
   return resumo.join(" | ");
 }
 
 function chamarGemini(prompt) {
-  const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash-lite:generateContent?key=${GEMINI_API_KEY}`;
+  const modelos = ["gemini-3.8-flash", "gemini-3.5-flash", "gemini-3.5-flash-lite"];
   const options = {
     method: "post",
     contentType: "application/json",
@@ -89,11 +78,19 @@ function chamarGemini(prompt) {
     muteHttpExceptions: true
   };
 
-  const response = UrlFetchApp.fetch(url, options);
-  const json = JSON.parse(response.getContentText());
-  
-  if (json.candidates && json.candidates[0].content) {
-    return json.candidates[0].content.parts[0].text.trim();
+  for (let tentativa = 1; tentativa <= 2; tentativa++) {
+    for (let i = 0; i < modelos.length; i++) {
+      const url = "https://generativelanguage.googleapis.com/v1beta/models/" + modelos[i] + ":generateContent?key=" + GEMINI_API_KEY;
+      const response = UrlFetchApp.fetch(url, options);
+      const json = JSON.parse(response.getContentText());
+
+      if (json.candidates && json.candidates[0] && json.candidates[0].content) {
+        return json.candidates[0].content.parts[0].text.trim();
+      }
+      console.error("Tentativa " + tentativa + " - Falha no modelo " + modelos[i] + ":", JSON.stringify(json));
+    }
+    Utilities.sleep(2000);
   }
+
   return "Erro temporário ao gerar resposta automática.";
 }
