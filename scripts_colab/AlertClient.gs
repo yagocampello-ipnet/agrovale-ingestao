@@ -1,6 +1,6 @@
 const CONFIG = {
   // Configurações de envio de e-mail:
-  EMAIL_CLIENTE: 'kelpinho123@gmail.com',
+  EMAIL_CLIENTE: '',
   EMAIL_CC: 'suportegeoanalise@ipnet.cloud',
   ASSUNTO_EMAIL: '🔴 Alerta Agronômico - Dashboard Powered by IAgro',
 
